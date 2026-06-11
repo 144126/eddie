@@ -7,7 +7,7 @@
 	let showForm = $state(false);
 	let name = $state('');
 	let provider = $state('openrouter');
-	let model = $state('anthropic/claude-sonnet-4');
+	let model = $state('nvidia/nemotron-3-ultra-550b-a55b:free');
 	let apiKey = $state('');
 	let creating = $state(false);
 	let error = $state('');

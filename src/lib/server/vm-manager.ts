@@ -142,6 +142,7 @@ export async function createVM(
 	try {
 		execSync(`cp --reflink=auto ${ROOTFS_BASE} ${rootfsPath} 2>/dev/null || cp ${ROOTFS_BASE} ${rootfsPath}`);
 	} catch (e) {
+		console.error(`[vm ${id}] rootfs copy failed:`, e instanceof Error ? e.message : e);
 		vm.status = 'error';
 		store.putVM(vm);
 		return vm;
@@ -208,6 +209,7 @@ export async function createVM(
 
 		vm.status = 'running';
 	} catch (e) {
+		console.error(`[vm ${id}] create failed:`, e instanceof Error ? e.message : e);
 		fcProcess.kill();
 		teardownTAP(tapDevice);
 		vm.status = 'error';
@@ -234,7 +236,8 @@ export async function startVM(id: string): Promise<VM | null> {
 	const rootfsPath = `/tmp/fc-${id}-rootfs.ext4`;
 	try {
 		execSync(`cp --reflink=auto ${ROOTFS_BASE} ${rootfsPath} 2>/dev/null || cp ${ROOTFS_BASE} ${rootfsPath}`);
-	} catch {
+	} catch (e) {
+		console.error(`[vm ${id}] rootfs copy failed:`, e instanceof Error ? e.message : e);
 		vm.status = 'error';
 		store.putVM(vm);
 		return vm;
@@ -270,7 +273,8 @@ export async function startVM(id: string): Promise<VM | null> {
 		await fcAPI(socketPath, 'PUT', '/mmds', { nous_api_key: vm.apiKey });
 		await fcAPI(socketPath, 'PUT', '/actions', { action_type: 'InstanceStart' });
 		vm.status = 'running';
-	} catch {
+	} catch (e) {
+		console.error(`[vm ${id}] startVM failed:`, e instanceof Error ? e.message : e);
 		fcProcess.kill();
 		teardownTAP(tapDevice);
 		vm.status = 'error';
