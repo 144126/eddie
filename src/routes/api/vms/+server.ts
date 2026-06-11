@@ -13,7 +13,7 @@ export async function POST({ request }) {
 	}
 	const ok = await vm.ensureImage();
 	if (!ok) {
-		return json({ error: 'Docker image eddie-hermes not found. Run: npm run docker:build' }, { status: 400 });
+		return json({ error: 'Docker image eddie-hermes not found. Run: pnpm docker:build' }, { status: 400 });
 	}
 	const v = await vm.createVM(name, provider, model, apiKey);
 	return json(v, { status: 201 });
