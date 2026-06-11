@@ -25,6 +25,14 @@ interface ActiveVM {
 const activeVMs = new Map<string, ActiveVM>();
 let ipCounter = 2;
 
+// On startup, mark stale "running" VMs as stopped (Firecracker process gone)
+for (const vm of store.getVMs()) {
+	if (vm.status === 'running' && !existsSync(vm.socketPath)) {
+		vm.status = 'stopped';
+		store.putVM(vm);
+	}
+}
+
 function nextIP(): string {
 	const ip = `${VM_IP_BASE}.${ipCounter}`;
 	ipCounter = (ipCounter % 253) + 2;
