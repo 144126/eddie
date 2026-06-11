@@ -4,98 +4,187 @@
 import { createServer } from 'node:net';
 import { readFileSync, unlinkSync } from 'node:fs';
 
-const NOUS_API_KEY = (readFileSync('/run/metadata/nous_api_key', 'utf-8') || '').trim();
-const API_BASE = (readFileSync('/run/metadata/api_base_url', 'utf-8') || 'https://openrouter.ai/api/v1').trim();
-const SOCKET_PATH = '/tmp/agent.sock';
+function log(step: string, msg: string) {
+	console.log(`[VSOCK-GUEST] [${step}] ${msg} (${new Date().toISOString()})`);
+}
 
+log('init', 'agent starting up');
+
+let NOUS_API_KEY = '';
+let API_BASE = 'https://openrouter.ai/api/v1';
+
+try {
+	NOUS_API_KEY = (readFileSync('/run/metadata/nous_api_key', 'utf-8') || '').trim();
+	log('init', `read nous_api_key from /run/metadata/nous_api_key, length=${NOUS_API_KEY.length}`);
+} catch (e) {
+	log('init', `FAILED to read /run/metadata/nous_api_key: ${e.message}`);
+}
+
+try {
+	API_BASE = (readFileSync('/run/metadata/api_base_url', 'utf-8') || API_BASE).trim();
+	log('init', `api_base_url = ${API_BASE}`);
+} catch (e) {
+	log('init', `FAILED to read /run/metadata/api_base_url: ${e.message}, using default: ${API_BASE}`);
+}
+
+const SOCKET_PATH = '/tmp/agent.sock';
 let currentHistory = [];
 
-try { unlinkSync(SOCKET_PATH); } catch {}
+try {
+	unlinkSync(SOCKET_PATH);
+	log('init', `cleaned up stale socket at ${SOCKET_PATH}`);
+} catch {
+	log('init', `no stale socket to clean at ${SOCKET_PATH}`);
+}
 
 const server = createServer((socket) => {
-  let buf = '';
+	let buf = '';
+	log('server', 'new connection accepted from socat');
 
-  socket.on('data', async (chunk) => {
-    buf += chunk.toString();
+	socket.on('data', async (chunk) => {
+		const raw = chunk.toString();
+		log('server', `received raw data (${raw.length} bytes): ${JSON.stringify(raw.slice(0, 300))}`);
 
-    // Try to parse complete message
-    try {
-      const msg = JSON.parse(buf.trim());
-      buf = '';
+		buf += raw;
 
-      if (msg.type === 'reset') {
-        currentHistory = [];
-        socket.write('OK\n__END__\n');
-        return;
-      }
+		// Try to parse complete message
+		try {
+			const msg = JSON.parse(buf.trim());
+			buf = '';
+			log('server', `JSON parsed successfully: type=${msg.type}, keys=${Object.keys(msg).join(',')}`);
 
-      if (msg.type === 'chat') {
-        const { text, history } = msg;
-        const messages = history || [];
-        if (text) messages.push({ role: 'user', content: text });
+			if (msg.type === 'reset') {
+				log('server', 'handling reset message');
+				currentHistory = [];
+				socket.write('OK\n__END__\n');
+				log('server', 'wrote OK\n__END__\n for reset');
+				return;
+			}
 
-        currentHistory = messages;
+			if (msg.type === 'chat') {
+				const { text, history, model } = msg;
+				const messages = history || [];
+				if (text) messages.push({ role: 'user', content: text });
 
-        const response = await fetch(`${API_BASE}/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${NOUS_API_KEY}`,
-            'HTTP-Referer': 'https://eddie.local',
-          },
-          body: JSON.stringify({
-            model: msg.model || 'nvidia/nemotron-3-ultra-550b-a55b:free',
-            messages,
-            stream: true,
-          }),
-        });
+				currentHistory = messages;
+				log('server', `chat message: text="${(text || '').slice(0, 100)}", history_len=${(history || []).length}, model=${model}`);
 
-        if (!response.ok) {
-          const err = await response.text();
-          socket.write(`ERROR: ${err}\n__END__\n`);
-          return;
-        }
+				const url = `${API_BASE}/chat/completions`;
+				const payload = {
+					model: model || 'nvidia/nemotron-3-ultra-550b-a55b:free',
+					messages,
+					stream: true,
+				};
+				log('server', `calling LLM API: POST ${url}`);
+				log('server', `request payload: ${JSON.stringify(payload).slice(0, 300)}`);
+				log('server', `auth header: Bearer ${NOUS_API_KEY.slice(0, 8)}...`);
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let fullText = '';
+				let response;
+				try {
+					response = await fetch(url, {
+						method: 'POST',
+						headers: {
+							'Content-Type': 'application/json',
+							'Authorization': `Bearer ${NOUS_API_KEY}`,
+							'HTTP-Referer': 'https://eddie.local',
+						},
+						body: JSON.stringify(payload),
+					});
+				} catch (fetchErr) {
+					log('server', `FETCH FAILED: ${fetchErr.message}`);
+					socket.write(`ERROR: fetch failed — ${fetchErr.message}\n__END__\n`);
+					return;
+				}
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+				log('server', `LLM API response status=${response.status} ${response.statusText}`);
 
-          const text = decoder.decode(value, { stream: true });
-          const lines = text.split('\n');
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const data = line.slice(6).trim();
-            if (data === '[DONE]') continue;
-            try {
-              const parsed = JSON.parse(data);
-              const token = parsed.choices?.[0]?.delta?.content || '';
-              if (token) {
-                fullText += token;
-                socket.write(token);
-              }
-            } catch {}
-          }
-        }
+				if (!response.ok) {
+					let err;
+					try { err = await response.text(); } catch { err = 'unknown error'; }
+					log('server', `LLM API error (${response.status}): ${err.slice(0, 300)}`);
+					socket.write(`ERROR: ${err}\n__END__\n`);
+					return;
+				}
 
-        currentHistory.push({ role: 'assistant', content: fullText });
-        socket.write('__END__\n');
-        return;
-      }
+				log('server', 'LLM API returned 200 OK, reading streaming response body');
 
-      socket.write(`ERR unknown message type: ${msg.type}\n__END__\n`);
-    } catch (e) {
-      if (e instanceof SyntaxError) return; // incomplete JSON, wait for more
-      socket.write(`ERR: ${e.message}\n__END__\n`);
-    }
-  });
+				const reader = response.body.getReader();
+				const decoder = new TextDecoder();
+				let fullText = '';
+				let tokenCount = 0;
 
-  socket.on('error', () => {});
+				while (true) {
+					let result;
+					try {
+						result = await reader.read();
+					} catch (readErr) {
+						log('server', `stream read error: ${readErr.message}`);
+						break;
+					}
+
+					const { done, value } = result;
+					if (done) {
+						log('server', `stream read complete, total tokens=${tokenCount}, fullText length=${fullText.length}`);
+						break;
+					}
+
+					const text = decoder.decode(value, { stream: true });
+					log('server', `stream chunk (${value.length} bytes): ${JSON.stringify(text.slice(0, 200))}`);
+
+					const lines = text.split('\n');
+					for (const line of lines) {
+						if (!line.startsWith('data: ')) continue;
+						const data = line.slice(6).trim();
+						if (data === '[DONE]') {
+							log('server', 'received [DONE] signal from API');
+							continue;
+						}
+						try {
+							const parsed = JSON.parse(data);
+							const token = parsed.choices?.[0]?.delta?.content || '';
+							if (token) {
+								tokenCount++;
+								fullText += token;
+								log('server', `token #${tokenCount}: ${JSON.stringify(token)}`);
+								socket.write(token);
+							}
+						} catch (parseErr) {
+							log('server', `failed to parse SSE line: ${JSON.stringify(data)}`);
+						}
+					}
+				}
+
+				currentHistory.push({ role: 'assistant', content: fullText });
+				log('server', `writing __END__ marker (total tokens=${tokenCount}, chars=${fullText.length})`);
+				socket.write('__END__\n');
+				return;
+			}
+
+			log('server', `unknown message type: ${msg.type}`);
+			socket.write(`ERR unknown message type: ${msg.type}\n__END__\n`);
+		} catch (e) {
+			if (e instanceof SyntaxError) {
+				log('server', `incomplete JSON in buffer (${buf.length} bytes), waiting for more data`);
+				return;
+			}
+			log('server', `error processing message: ${e.message}`);
+			socket.write(`ERR: ${e.message}\n__END__\n`);
+		}
+	});
+
+	socket.on('error', (err) => {
+		log('server', `socket error: ${err.message}`);
+	});
+
+	socket.on('close', () => {
+		log('server', 'connection closed');
+	});
 });
 
 server.listen(SOCKET_PATH, () => {
-  console.log(`[agent] Listening on ${SOCKET_PATH}`);
+	log('server', `LISTENING on ${SOCKET_PATH}`);
+});
+
+server.on('error', (err) => {
+	log('server', `server error: ${err.message}`);
 });

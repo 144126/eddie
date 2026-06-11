@@ -44,6 +44,7 @@ function genId(): string {
 }
 
 function fcAPI(socketPath: string, method: string, apiPath: string, body?: unknown): Promise<unknown> {
+	console.log(`[FC-API] ${method} ${apiPath} body=${body ? JSON.stringify(body).slice(0, 200) : 'none'} (${new Date().toISOString()})`);
 	return new Promise((resolve, reject) => {
 		const bodyStr = body ? JSON.stringify(body) : undefined;
 		const req = http.request(
@@ -63,25 +64,36 @@ function fcAPI(socketPath: string, method: string, apiPath: string, body?: unkno
 				res.on('data', (chunk) => (data += chunk));
 				res.on('end', () => {
 					if (res.statusCode! >= 200 && res.statusCode! < 300) {
+						console.log(`[FC-API] ${method} ${apiPath} → ${res.statusCode} (${new Date().toISOString()})`);
 						resolve(data ? JSON.parse(data) : null);
 					} else {
+						console.log(`[FC-API] ${method} ${apiPath} → ${res.statusCode} body=${data.slice(0, 200)} (${new Date().toISOString()})`);
 						reject(new Error(`FC ${method} ${apiPath}: ${res.statusCode} ${data}`));
 					}
 				});
 			},
 		);
-		req.on('error', reject);
+		req.on('error', (err) => {
+			console.log(`[FC-API] ${method} ${apiPath} ERROR: ${err.message} (${new Date().toISOString()})`);
+			reject(err);
+		});
 		if (bodyStr) req.write(bodyStr);
 		req.end();
 	});
 }
 
-function waitForSocket(socketPath: string, timeoutMs = 5000): Promise<void> {
+function waitForSocket(socketPath: string, timeoutMs = 8000): Promise<void> {
 	return new Promise((resolve, reject) => {
 		const deadline = Date.now() + timeoutMs;
 		const poll = () => {
-			if (existsSync(socketPath)) return resolve();
-			if (Date.now() > deadline) return reject(new Error(`Socket never appeared: ${socketPath}`));
+			if (existsSync(socketPath)) {
+				console.log(`[FC-API] socket appeared: ${socketPath} (${new Date().toISOString()})`);
+				return resolve();
+			}
+			if (Date.now() > deadline) {
+				console.log(`[FC-API] socket NEVER appeared: ${socketPath} after ${timeoutMs}ms (${new Date().toISOString()})`);
+				return reject(new Error(`Socket never appeared: ${socketPath}`));
+			}
 			setTimeout(poll, 50);
 		};
 		poll();
@@ -123,6 +135,10 @@ export function getVM(id: string): VM | undefined {
 	return store.getVM(id);
 }
 
+function vmLog(id: string, step: string, msg: string) {
+	console.log(`[VM-MGR] [${id}] [${step}] ${msg} (${new Date().toISOString()})`);
+}
+
 export async function createVM(
 	name: string,
 	provider: string,
@@ -133,7 +149,12 @@ export async function createVM(
 	const vmIP = nextIP();
 	const socketPath = `/tmp/fc-${id}.sock`;
 	const vsockPath = `/tmp/fc-${id}-vsock.sock`;
+
+	vmLog(id, 'createVM', `name=${name} provider=${provider} model=${model}`);
+	vmLog(id, 'createVM', `vmIP=${vmIP} socketPath=${socketPath} vsockPath=${vsockPath}`);
+
 	const tapDevice = setupTAP(id);
+	vmLog(id, 'createVM', `tap device ${tapDevice} created`);
 
 	const vm: VM = {
 		id,
@@ -150,83 +171,87 @@ export async function createVM(
 	};
 	store.putVM(vm);
 
-	// Clone rootfs
 	const rootfsPath = `/tmp/fc-${id}-rootfs.ext4`;
+	vmLog(id, 'createVM', `cloning rootfs from ${ROOTFS_BASE} to ${rootfsPath}`);
 	try {
 		execSync(`cp --reflink=auto ${ROOTFS_BASE} ${rootfsPath} 2>/dev/null || cp ${ROOTFS_BASE} ${rootfsPath}`);
+		vmLog(id, 'createVM', 'rootfs clone OK');
 	} catch (e) {
-		console.error(`[vm ${id}] rootfs copy failed:`, e instanceof Error ? e.message : e);
+		vmLog(id, 'createVM', `rootfs copy FAILED: ${e instanceof Error ? e.message : e}`);
 		vm.status = 'error';
 		store.putVM(vm);
 		return vm;
 	}
 
-	const fcProcess = spawn(FC_BINARY, [
-		'--api-sock', socketPath,
-	], {
-		stdio: 'ignore',
-	});
+	vmLog(id, 'createVM', `spawning Firecracker: ${FC_BINARY} --api-sock ${socketPath}`);
+	const fcProcess = spawn(FC_BINARY, ['--api-sock', socketPath], { stdio: 'ignore' });
+	vmLog(id, 'createVM', `Firecracker PID=${fcProcess.pid}`);
 
 	activeVMs.set(id, { process: fcProcess, tapDevice });
 
-	fcProcess.on('exit', () => {
+	fcProcess.on('exit', (code, signal) => {
+		vmLog(id, 'fc-exit', `Firecracker exited code=${code} signal=${signal}`);
 		activeVMs.delete(id);
 		try { unlinkSync(socketPath); } catch {}
 		try { unlinkSync(vsockPath); } catch {}
 		teardownTAP(tapDevice);
 		const v = store.getVM(id);
 		if (v && v.status === 'running') {
+			vmLog(id, 'fc-exit', 'setting status → stopped (was running)');
 			v.status = 'stopped';
 			store.putVM(v);
 		}
 	});
 
+	fcProcess.on('error', (err) => {
+		vmLog(id, 'fc-error', `Firecracker spawn error: ${err.message}`);
+	});
+
 	try {
+		vmLog(id, 'createVM', 'waiting for Firecracker API socket to appear...');
 		await waitForSocket(socketPath);
+		vmLog(id, 'createVM', 'Firecracker API socket ready');
 
-		await fcAPI(socketPath, 'PUT', '/machine-config', {
-			vcpu_count: VCPU,
-			mem_size_mib: MEM_MB,
-		});
+		vmLog(id, 'createVM', 'PUT /machine-config');
+		await fcAPI(socketPath, 'PUT', '/machine-config', { vcpu_count: VCPU, mem_size_mib: MEM_MB });
+		vmLog(id, 'createVM', '/machine-config OK');
 
+		vmLog(id, 'createVM', 'PUT /boot-source');
 		await fcAPI(socketPath, 'PUT', '/boot-source', {
 			kernel_image_path: KERNEL_PATH,
 			boot_args: `console=ttyS0 reboot=k panic=1 pci=off ip=${vmIP}::172.20.0.1:255.255.255.0`,
 		});
+		vmLog(id, 'createVM', '/boot-source OK');
 
+		vmLog(id, 'createVM', 'PUT /drives/rootfs');
 		await fcAPI(socketPath, 'PUT', '/drives/rootfs', {
-			drive_id: 'rootfs',
-			path_on_host: rootfsPath,
-			is_root_device: true,
-			is_read_only: false,
+			drive_id: 'rootfs', path_on_host: rootfsPath, is_root_device: true, is_read_only: false,
 		});
+		vmLog(id, 'createVM', '/drives/rootfs OK');
 
+		vmLog(id, 'createVM', 'PUT /network-interfaces/eth0');
 		await fcAPI(socketPath, 'PUT', '/network-interfaces/eth0', {
-			iface_id: 'eth0',
-			guest_mac: genMAC(id),
-			host_dev_name: tapDevice,
+			iface_id: 'eth0', guest_mac: genMAC(id), host_dev_name: tapDevice,
 		});
+		vmLog(id, 'createVM', '/network-interfaces/eth0 OK');
 
-		await fcAPI(socketPath, 'PUT', '/vsock', {
-			guest_cid: 3,
-			uds_path: vsockPath,
-		});
+		vmLog(id, 'createVM', `PUT /vsock guest_cid=3 uds_path=${vsockPath}`);
+		await fcAPI(socketPath, 'PUT', '/vsock', { guest_cid: 3, uds_path: vsockPath });
+		vmLog(id, 'createVM', '/vsock OK');
 
-		await fcAPI(socketPath, 'PUT', '/mmds/config', {
-			network_interfaces: ['eth0'],
-		});
-		await fcAPI(socketPath, 'PUT', '/mmds', {
-			nous_api_key: apiKey,
-			api_base_url: apiBaseURL(provider),
-		});
+		vmLog(id, 'createVM', 'PUT /mmds/config + /mmds');
+		await fcAPI(socketPath, 'PUT', '/mmds/config', { network_interfaces: ['eth0'] });
+		await fcAPI(socketPath, 'PUT', '/mmds', { nous_api_key: apiKey, api_base_url: apiBaseURL(provider) });
+		vmLog(id, 'createVM', '/mmds OK');
 
-		await fcAPI(socketPath, 'PUT', '/actions', {
-			action_type: 'InstanceStart',
-		});
+		vmLog(id, 'createVM', 'PUT /actions InstanceStart (booting VM)...');
+		await fcAPI(socketPath, 'PUT', '/actions', { action_type: 'InstanceStart' });
+		vmLog(id, 'createVM', 'InstanceStart OK, VM is booting');
 
 		vm.status = 'running';
+		vmLog(id, 'createVM', 'status set to running');
 	} catch (e) {
-		console.error(`[vm ${id}] create failed:`, e instanceof Error ? e.message : e);
+		vmLog(id, 'createVM', `FAILED: ${e instanceof Error ? e.message : e}`);
 		fcProcess.kill();
 		teardownTAP(tapDevice);
 		vm.status = 'error';
@@ -234,76 +259,111 @@ export async function createVM(
 	}
 
 	store.putVM(vm);
+	vmLog(id, 'createVM', `returning VM status=${vm.status}`);
 	return vm;
 }
 
 export async function startVM(id: string): Promise<VM | null> {
+	vmLog(id, 'startVM', 'startVM called');
 	const existing = store.getVM(id);
-	if (!existing) return null;
-	if (existing.status === 'running') return existing;
+	if (!existing) {
+		vmLog(id, 'startVM', 'VM not found in store');
+		return null;
+	}
+	if (existing.status === 'running') {
+		vmLog(id, 'startVM', 'VM already running, returning early');
+		return existing;
+	}
 
 	const vmIP = nextIP();
 	const socketPath = `/tmp/fc-${id}.sock`;
 	const vsockPath = `/tmp/fc-${id}-vsock.sock`;
 
-	// Clean stale state from prior failed attempts
+	vmLog(id, 'startVM', `cleaning stale state socketPath=${socketPath} vsockPath=${vsockPath}`);
 	try { unlinkSync(socketPath); } catch {}
 	try { unlinkSync(vsockPath); } catch {}
 	teardownTAP(`tap-${id.slice(0, 8)}`);
 
 	const tapDevice = setupTAP(id);
+	vmLog(id, 'startVM', `tap device ${tapDevice} created`);
 
 	const vm: VM = { ...existing, ip: vmIP, socketPath, vsockPath, tapDevice, status: 'creating' };
 	store.putVM(vm);
 
 	const rootfsPath = `/tmp/fc-${id}-rootfs.ext4`;
+	vmLog(id, 'startVM', `cloning rootfs from ${ROOTFS_BASE} to ${rootfsPath}`);
 	try {
 		execSync(`cp --reflink=auto ${ROOTFS_BASE} ${rootfsPath} 2>/dev/null || cp ${ROOTFS_BASE} ${rootfsPath}`);
+		vmLog(id, 'startVM', 'rootfs clone OK');
 	} catch (e) {
-		console.error(`[vm ${id}] rootfs copy failed:`, e instanceof Error ? e.message : e);
+		vmLog(id, 'startVM', `rootfs copy FAILED: ${e instanceof Error ? e.message : e}`);
 		vm.status = 'error';
 		store.putVM(vm);
 		return vm;
 	}
 
 	const fcProcess = spawn(FC_BINARY, ['--api-sock', socketPath], { stdio: 'ignore' });
+	vmLog(id, 'startVM', `Firecracker spawned PID=${fcProcess.pid}`);
 	activeVMs.set(id, { process: fcProcess, tapDevice });
 
-	fcProcess.on('exit', () => {
+	fcProcess.on('exit', (code, signal) => {
+		vmLog(id, 'fc-exit', `Firecracker exited code=${code} signal=${signal}`);
 		activeVMs.delete(id);
 		try { unlinkSync(socketPath); } catch {}
 		try { unlinkSync(vsockPath); } catch {}
 		teardownTAP(tapDevice);
 		const v = store.getVM(id);
 		if (v && v.status === 'running') {
+			vmLog(id, 'fc-exit', 'setting status → stopped');
 			v.status = 'stopped';
 			store.putVM(v);
 		}
 	});
 
+	fcProcess.on('error', (err) => {
+		vmLog(id, 'fc-error', `Firecracker spawn error: ${err.message}`);
+	});
+
 	try {
+		vmLog(id, 'startVM', 'waiting for API socket...');
 		await waitForSocket(socketPath);
+		vmLog(id, 'startVM', 'API socket ready');
+
 		await fcAPI(socketPath, 'PUT', '/machine-config', { vcpu_count: VCPU, mem_size_mib: MEM_MB });
+		vmLog(id, 'startVM', '/machine-config OK');
+
 		await fcAPI(socketPath, 'PUT', '/boot-source', {
 			kernel_image_path: KERNEL_PATH,
 			boot_args: `console=ttyS0 reboot=k panic=1 pci=off ip=${vmIP}::172.20.0.1:255.255.255.0`,
 		});
+		vmLog(id, 'startVM', '/boot-source OK');
+
 		await fcAPI(socketPath, 'PUT', '/drives/rootfs', {
 			drive_id: 'rootfs', path_on_host: rootfsPath, is_root_device: true, is_read_only: false,
 		});
+		vmLog(id, 'startVM', '/drives/rootfs OK');
+
 		await fcAPI(socketPath, 'PUT', '/network-interfaces/eth0', {
 			iface_id: 'eth0', guest_mac: genMAC(id), host_dev_name: tapDevice,
 		});
+		vmLog(id, 'startVM', '/network-interfaces/eth0 OK');
+
 		await fcAPI(socketPath, 'PUT', '/vsock', { guest_cid: 3, uds_path: vsockPath });
+		vmLog(id, 'startVM', '/vsock OK');
+
 		await fcAPI(socketPath, 'PUT', '/mmds/config', { network_interfaces: ['eth0'] });
 		await fcAPI(socketPath, 'PUT', '/mmds', {
-			nous_api_key: vm.apiKey,
-			api_base_url: apiBaseURL(vm.provider),
+			nous_api_key: vm.apiKey, api_base_url: apiBaseURL(vm.provider),
 		});
+		vmLog(id, 'startVM', '/mmds OK');
+
 		await fcAPI(socketPath, 'PUT', '/actions', { action_type: 'InstanceStart' });
+		vmLog(id, 'startVM', 'InstanceStart OK, VM booting');
+
 		vm.status = 'running';
+		vmLog(id, 'startVM', 'status set to running');
 	} catch (e) {
-		console.error(`[vm ${id}] startVM failed:`, e instanceof Error ? e.message : e);
+		vmLog(id, 'startVM', `FAILED: ${e instanceof Error ? e.message : e}`);
 		fcProcess.kill();
 		teardownTAP(tapDevice);
 		vm.status = 'error';
@@ -311,6 +371,7 @@ export async function startVM(id: string): Promise<VM | null> {
 	}
 
 	store.putVM(vm);
+	vmLog(id, 'startVM', `returning VM status=${vm.status}`);
 	return vm;
 }
 
