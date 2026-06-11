@@ -25,3 +25,6 @@ vite.config.ts.timestamp-*
 # Build artifacts
 /assets/rootfs.ext4
 /assets/vmlinux
+
+# Runtime data
+/data/

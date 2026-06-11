@@ -158,6 +158,9 @@ export async function createVM(
 
 	fcProcess.on('exit', () => {
 		activeVMs.delete(id);
+		try { unlinkSync(socketPath); } catch {}
+		try { unlinkSync(vsockPath); } catch {}
+		teardownTAP(tapDevice);
 		const v = store.getVM(id);
 		if (v && v.status === 'running') {
 			v.status = 'stopped';
@@ -228,6 +231,12 @@ export async function startVM(id: string): Promise<VM | null> {
 	const vmIP = nextIP();
 	const socketPath = `/tmp/fc-${id}.sock`;
 	const vsockPath = `/tmp/fc-${id}-vsock.sock`;
+
+	// Clean stale state from prior failed attempts
+	try { unlinkSync(socketPath); } catch {}
+	try { unlinkSync(vsockPath); } catch {}
+	teardownTAP(`tap-${id.slice(0, 8)}`);
+
 	const tapDevice = setupTAP(id);
 
 	const vm: VM = { ...existing, ip: vmIP, socketPath, vsockPath, tapDevice, status: 'creating' };
@@ -248,6 +257,9 @@ export async function startVM(id: string): Promise<VM | null> {
 
 	fcProcess.on('exit', () => {
 		activeVMs.delete(id);
+		try { unlinkSync(socketPath); } catch {}
+		try { unlinkSync(vsockPath); } catch {}
+		teardownTAP(tapDevice);
 		const v = store.getVM(id);
 		if (v && v.status === 'running') {
 			v.status = 'stopped';
