@@ -90,7 +90,7 @@ function teardownTAP(tapDevice: string) {
 }
 
 function genMAC(vmId: string): string {
-	const hex = vmId.replace(/-/g, '').slice(0, 10).padEnd(10, '0');
+	const hex = [...vmId].map(c => (c.charCodeAt(0) % 16).toString(16)).join('').slice(0, 10).padEnd(10, '0');
 	return `02:${hex.slice(0, 2)}:${hex.slice(2, 4)}:${hex.slice(4, 6)}:${hex.slice(6, 8)}:${hex.slice(8, 10)}`;
 }
 
