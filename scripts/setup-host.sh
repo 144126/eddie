@@ -3,19 +3,38 @@ set -e
 
 echo "[eddie] Setting up host for Firecracker microVMs..."
 
-# KVM access
-sudo setfacl -m u:"${USER}":rw /dev/kvm 2>/dev/null || {
-  echo "WARN: Could not set ACL on /dev/kvm. Make sure your user has rw access."
-}
+# KVM access (group membership requires re-login; fallback to world-rw)
+if ! [ -r /dev/kvm ] 2>/dev/null; then
+  sudo chmod 666 /dev/kvm 2>/dev/null || {
+    echo "WARN: Could not set permissions on /dev/kvm."
+  }
+fi
 
 # Firecracker binary
 FC_VERSION="1.10.1"
-FC_URL="https://github.com/firecracker-microvm/firecracker/releases/download/v${FC_VERSION}"
-if ! command -v firecracker &>/dev/null; then
+FC_RELEASE_URL="https://github.com/firecracker-microvm/firecracker/releases/download/v${FC_VERSION}"
+FC_CI_VERSION="v${FC_VERSION%.*}"
+if ! command -v firecracker &>/dev/null || [ "$(firecracker --version 2>/dev/null | head -1)" = "" ]; then
   echo "[eddie] Downloading Firecracker v${FC_VERSION}..."
-  sudo curl -Lo /usr/local/bin/firecracker "${FC_URL}/firecracker-v${FC_VERSION}-x86_64"
-  sudo curl -Lo /usr/local/bin/jailer "${FC_URL}/jailer-v${FC_VERSION}-x86_64"
+  curl -sL -o /tmp/firecracker.tgz "${FC_RELEASE_URL}/firecracker-v${FC_VERSION}-x86_64.tgz"
+  sudo tar -xzf /tmp/firecracker.tgz -C /usr/local/bin \
+    "release-v${FC_VERSION}-x86_64/firecracker-v${FC_VERSION}-x86_64" \
+    "release-v${FC_VERSION}-x86_64/jailer-v${FC_VERSION}-x86_64" \
+    --strip-components=1
+  sudo mv /usr/local/bin/firecracker-v${FC_VERSION}-x86_64 /usr/local/bin/firecracker
+  sudo mv /usr/local/bin/jailer-v${FC_VERSION}-x86_64 /usr/local/bin/jailer
   sudo chmod +x /usr/local/bin/firecracker /usr/local/bin/jailer
+  rm -f /tmp/firecracker.tgz
+fi
+
+# Firecracker kernel (from official CI S3 bucket)
+if [ ! -f assets/vmlinux ]; then
+  KERNEL_KEY="$(curl -s "http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/${FC_CI_VERSION}/x86_64/vmlinux-&list-type=2" \
+    | grep -oP "(?<=<Key>)firecracker-ci/${FC_CI_VERSION}/x86_64/vmlinux-[0-9]+\.[0-9]+\.[0-9]{1,3}(?=</Key>)" \
+    | sort -V | tail -1)"
+  echo "[eddie] Downloading kernel: ${KERNEL_KEY} ..."
+  curl -sL -o assets/vmlinux "https://s3.amazonaws.com/spec.ccfc.min/${KERNEL_KEY}"
+  chmod 644 assets/vmlinux
 fi
 
 # Jailer user
