@@ -1,4 +1,5 @@
 import net from 'node:net';
+import { existsSync } from 'node:fs';
 
 const VSOCK_PORT = 52;
 const TIMEOUT = 15000;
@@ -6,6 +7,9 @@ const TIMEOUT = 15000;
 export type VsockStreamCb = (token: string) => void;
 
 function createConnection(vsockPath: string): Promise<net.Socket> {
+	if (!existsSync(vsockPath)) {
+		return Promise.reject(new Error(`VM not running — vsock socket not found at ${vsockPath}`));
+	}
 	return new Promise((resolve, reject) => {
 		const socket = net.createConnection({ path: vsockPath }, () => {
 			socket.write(`CONNECT ${VSOCK_PORT}\n`);
