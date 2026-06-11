@@ -184,8 +184,11 @@ export async function createVM(
 	}
 
 	vmLog(id, 'createVM', `spawning Firecracker: ${FC_BINARY} --api-sock ${socketPath}`);
-	const fcProcess = spawn(FC_BINARY, ['--api-sock', socketPath], { stdio: 'ignore' });
+	const fcProcess = spawn(FC_BINARY, ['--api-sock', socketPath], { stdio: ['ignore', 'pipe', 'pipe'] });
 	vmLog(id, 'createVM', `Firecracker PID=${fcProcess.pid}`);
+
+	fcProcess.stdout?.on('data', (d) => process.stdout.write(`[FC-GUEST ${id}] ${d}`));
+	fcProcess.stderr?.on('data', (d) => process.stderr.write(`[FC-GUEST ${id}] ${d}`));
 
 	activeVMs.set(id, { process: fcProcess, tapDevice });
 
@@ -302,8 +305,12 @@ export async function startVM(id: string): Promise<VM | null> {
 		return vm;
 	}
 
-	const fcProcess = spawn(FC_BINARY, ['--api-sock', socketPath], { stdio: 'ignore' });
+	const fcProcess = spawn(FC_BINARY, ['--api-sock', socketPath], { stdio: ['ignore', 'pipe', 'pipe'] });
 	vmLog(id, 'startVM', `Firecracker spawned PID=${fcProcess.pid}`);
+
+	fcProcess.stdout?.on('data', (d) => process.stdout.write(`[FC-GUEST ${id}] ${d}`));
+	fcProcess.stderr?.on('data', (d) => process.stderr.write(`[FC-GUEST ${id}] ${d}`));
+
 	activeVMs.set(id, { process: fcProcess, tapDevice });
 
 	fcProcess.on('exit', (code, signal) => {
