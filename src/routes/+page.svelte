@@ -81,10 +81,11 @@
 						<input class="input" placeholder="VM name" bind:value={name} required />
 						<select class="input" bind:value={provider}>
 							<option value="openrouter">OpenRouter</option>
+							<option value="nous">Nous Portal</option>
 							<option value="anthropic">Anthropic</option>
 							<option value="openai">OpenAI</option>
 						</select>
-						<input class="input" placeholder="Model (e.g. anthropic/claude-sonnet-4)" bind:value={model} required />
+						<input class="input" placeholder="Model" bind:value={model} required />
 						<input class="input" type="password" placeholder="API key" bind:value={apiKey} required />
 						{#if error}
 							<p style="color: var(--color-accent-sunset); font-size: var(--text-body-sm); margin: 0;">{error}</p>

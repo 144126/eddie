@@ -12,6 +12,11 @@ const VM_IP_BASE = '172.20.0';
 const VCPU = 1;
 const MEM_MB = 256;
 
+function apiBaseURL(provider: string): string {
+	if (provider === 'nous') return 'https://inference-api.nousresearch.com/v1';
+	return 'https://openrouter.ai/api/v1';
+}
+
 interface ActiveVM {
 	process: ChildProcess;
 	tapDevice: string;
@@ -204,6 +209,7 @@ export async function createVM(
 		});
 		await fcAPI(socketPath, 'PUT', '/mmds', {
 			nous_api_key: apiKey,
+			api_base_url: apiBaseURL(provider),
 		});
 
 		await fcAPI(socketPath, 'PUT', '/actions', {
@@ -282,7 +288,10 @@ export async function startVM(id: string): Promise<VM | null> {
 		});
 		await fcAPI(socketPath, 'PUT', '/vsock', { guest_cid: 3, uds_path: vsockPath });
 		await fcAPI(socketPath, 'PUT', '/mmds/config', { network_interfaces: ['eth0'] });
-		await fcAPI(socketPath, 'PUT', '/mmds', { nous_api_key: vm.apiKey });
+		await fcAPI(socketPath, 'PUT', '/mmds', {
+			nous_api_key: vm.apiKey,
+			api_base_url: apiBaseURL(vm.provider),
+		});
 		await fcAPI(socketPath, 'PUT', '/actions', { action_type: 'InstanceStart' });
 		vm.status = 'running';
 	} catch (e) {

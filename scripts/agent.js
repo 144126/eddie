@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 
 const VSOCK_PORT = 52;
 const NOUS_API_KEY = (readFileSync('/run/metadata/nous_api_key', 'utf-8') || '').trim();
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const API_BASE = (readFileSync('/run/metadata/api_base_url', 'utf-8') || 'https://openrouter.ai/api/v1').trim();
 
 let currentHistory = [];
 
@@ -50,8 +50,8 @@ const server = createServer((socket) => {
 
         currentHistory = messages;
 
-        // Call OpenRouter with streaming
-        const response = await fetch(OPENROUTER_URL, {
+        // Call LLM API with streaming
+        const response = await fetch(`${API_BASE}/chat/completions`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
