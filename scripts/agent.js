@@ -1,38 +1,24 @@
 // Hermes agent process — runs inside Firecracker microVM
-// Listens on vsock port 52, receives chat messages, calls LLM API, streams response back
+// Listens on Unix socket, socat bridges AF_VSOCK port 52 → Unix socket
 
 import { createServer } from 'node:net';
-import { readFileSync } from 'node:fs';
+import { readFileSync, unlinkSync } from 'node:fs';
 
-const VSOCK_PORT = 52;
 const NOUS_API_KEY = (readFileSync('/run/metadata/nous_api_key', 'utf-8') || '').trim();
 const API_BASE = (readFileSync('/run/metadata/api_base_url', 'utf-8') || 'https://openrouter.ai/api/v1').trim();
+const SOCKET_PATH = '/tmp/agent.sock';
 
 let currentHistory = [];
 
+try { unlinkSync(SOCKET_PATH); } catch {}
+
 const server = createServer((socket) => {
   let buf = '';
-  let handshakeDone = false;
 
   socket.on('data', async (chunk) => {
     buf += chunk.toString();
 
-    if (!handshakeDone) {
-      if (buf.includes('\n')) {
-        const line = buf.split('\n')[0].trim();
-        buf = buf.slice(line.length + 1);
-        if (line === `CONNECT ${VSOCK_PORT}`) {
-          handshakeDone = true;
-          socket.write('OK\n');
-        } else {
-          socket.write('ERR unknown protocol\n');
-          socket.end();
-        }
-      }
-      return;
-    }
-
-    // Parse message
+    // Try to parse complete message
     try {
       const msg = JSON.parse(buf.trim());
       buf = '';
@@ -50,7 +36,6 @@ const server = createServer((socket) => {
 
         currentHistory = messages;
 
-        // Call LLM API with streaming
         const response = await fetch(`${API_BASE}/chat/completions`, {
           method: 'POST',
           headers: {
@@ -103,6 +88,7 @@ const server = createServer((socket) => {
 
       socket.write(`ERR unknown message type: ${msg.type}\n__END__\n`);
     } catch (e) {
+      if (e instanceof SyntaxError) return; // incomplete JSON, wait for more
       socket.write(`ERR: ${e.message}\n__END__\n`);
     }
   });
@@ -110,6 +96,6 @@ const server = createServer((socket) => {
   socket.on('error', () => {});
 });
 
-server.listen(VSOCK_PORT, () => {
-  console.log(`[agent] Listening on vsock port ${VSOCK_PORT}`);
+server.listen(SOCKET_PATH, () => {
+  console.log(`[agent] Listening on ${SOCKET_PATH}`);
 });

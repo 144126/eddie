@@ -30,6 +30,16 @@ echo "nameserver 1.1.1.1" | sudo tee "$ROOTFS_DIR/etc/resolv.conf" >/dev/null
 # Create runtime directories
 sudo mkdir -p "$ROOTFS_DIR/run/metadata" "$ROOTFS_DIR/app"
 
+# Install socat (needed to bridge AF_VSOCK → Unix socket — Node.js can't bind vsock natively)
+# Use host's apk-tools-static if available, otherwise chroot into rootfs
+echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/main" | sudo tee "$ROOTFS_DIR/etc/apk/repositories" >/dev/null
+sudo cp /etc/resolv.conf "$ROOTFS_DIR/etc/resolv.conf" 2>/dev/null || true
+sudo mount -t proc none "$ROOTFS_DIR/proc"
+sudo chroot "$ROOTFS_DIR" apk add --no-cache socat
+sudo umount "$ROOTFS_DIR/proc"
+# Restore DNS config for the VM (host's resolv.conf may have systemd stub 127.0.0.53)
+echo "nameserver 1.1.1.1" | sudo tee "$ROOTFS_DIR/etc/resolv.conf" >/dev/null
+
 # Copy agent scripts
 sudo rm -f "$ROOTFS_DIR/sbin/init"
 sudo cp scripts/agent-init.sh "$ROOTFS_DIR/sbin/init"

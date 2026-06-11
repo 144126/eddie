@@ -2,7 +2,7 @@ import net from 'node:net';
 import { existsSync } from 'node:fs';
 
 const VSOCK_PORT = 52;
-const TIMEOUT = 15000;
+const TIMEOUT = 60000;
 
 export type VsockStreamCb = (token: string) => void;
 

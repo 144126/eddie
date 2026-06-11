@@ -23,24 +23,26 @@ fi
 
 # Read metadata from MMDS via wget
 for i in $(seq 1 30); do
-  NOUS_KEY=$(wget -q -O - http://169.254.169.254/latest/meta-data/nous_api_key 2>/dev/null) && break
-  sleep 0.5
+	NOUS_KEY=$(wget -q -O - http://169.254.169.254/latest/meta-data/nous_api_key 2>/dev/null) && break
+	sleep 0.5
 done
 
 echo "$NOUS_KEY" > /run/metadata/nous_api_key
 
-export NOUS_API_KEY="$NOUS_KEY"
+# Start socat to bridge AF_VSOCK port 52 → Unix socket for Node.js agent
+# (Node.js net.createServer can only bind TCP/Unix, not AF_VSOCK)
+socat VSOCK-LISTEN:52,fork UNIX-CONNECT:/tmp/agent.sock &
 
-# Start the agent
+# Start agent listening on Unix socket
 cd /app
 node agent.js &
 AGENT_PID=$!
 
 # PID 1 reap loop — restart agent if it crashes
 while true; do
-  wait "$AGENT_PID" 2>/dev/null || true
-  sleep 1
-  echo "[init] Agent exited, restarting..."
-  node agent.js &
-  AGENT_PID=$!
+	wait "$AGENT_PID" 2>/dev/null || true
+	sleep 1
+	echo "[init] Agent exited, restarting..."
+	node agent.js &
+	AGENT_PID=$!
 done
