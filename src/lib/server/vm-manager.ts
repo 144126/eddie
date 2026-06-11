@@ -77,15 +77,15 @@ function waitForSocket(socketPath: string, timeoutMs = 5000): Promise<void> {
 
 function setupTAP(vmId: string): string {
 	const tap = `tap-${vmId.slice(0, 8)}`;
-	execSync(`ip tuntap add dev ${tap} mode tap`);
-	execSync(`ip link set ${tap} master fc-br0`);
-	execSync(`ip link set ${tap} up`);
+	execSync(`sudo ip tuntap add dev ${tap} mode tap`);
+	execSync(`sudo ip link set ${tap} master fc-br0`);
+	execSync(`sudo ip link set ${tap} up`);
 	return tap;
 }
 
 function teardownTAP(tapDevice: string) {
 	try {
-		execSync(`ip link del ${tapDevice}`);
+		execSync(`sudo ip link del ${tapDevice}`);
 	} catch {}
 }
 

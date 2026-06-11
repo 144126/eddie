@@ -59,7 +59,7 @@ const server = createServer((socket) => {
             'HTTP-Referer': 'https://eddie.local',
           },
           body: JSON.stringify({
-            model: msg.model || 'anthropic/claude-sonnet-4',
+            model: msg.model || 'nvidia/nemotron-3-ultra-550b-a55b:free',
             messages,
             stream: true,
           }),

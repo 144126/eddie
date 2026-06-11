@@ -55,5 +55,11 @@ sudo iptables -A FORWARD -s 172.20.0.0/24 -d 172.20.0.0/24 -j DROP 2>/dev/null |
 # Enable IP forwarding
 echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward >/dev/null
 
+# Passwordless sudo for TAP device management
+TARGET_USER="${SUDO_USER:-${USER}}"
+IP_BIN="$(command -v ip)"
+echo "${TARGET_USER} ALL=(root) NOPASSWD: ${IP_BIN} tuntap add dev tap-* mode tap, ${IP_BIN} link set tap-* master fc-br0, ${IP_BIN} link set tap-* up, ${IP_BIN} link del tap-*" | \
+  sudo tee "/etc/sudoers.d/eddie-tap" >/dev/null
+
 echo "[eddie] Host setup complete."
 echo "Next: run scripts/build-rootfs.sh to create the VM rootfs image."
