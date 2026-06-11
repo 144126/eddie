@@ -4,8 +4,10 @@ export interface VM {
 	id: string;
 	name: string;
 	status: VMStatus;
-	port: number;
-	containerId: string;
+	ip: string;
+	socketPath: string;
+	vsockPath: string;
+	tapDevice: string;
 	provider: string;
 	model: string;
 	apiKey: string;

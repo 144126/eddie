@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import * as vm from '$lib/server/vm-manager';
 import * as store from '$lib/server/store';
+import { streamMessage } from '$lib/server/vsock';
 
 export function GET({ params }) {
 	const v = vm.getVM(params.id);
@@ -20,7 +21,7 @@ export async function POST({ params, request }) {
 	}
 
 	if (action === 'stop') {
-		const result = await vm.stopVM(params.id);
+		const result = await vm.killVM(params.id);
 		return json(result);
 	}
 
@@ -40,7 +41,6 @@ export async function POST({ params, request }) {
 		};
 		store.addMessage(params.id, userMsg);
 
-		const baseUrl = vm.getChatUrl(v);
 		const hist = store.getMessages(params.id);
 		const msgs = hist.map((m) => ({ role: m.role, content: m.content }));
 
@@ -49,59 +49,28 @@ export async function POST({ params, request }) {
 		const stream = new ReadableStream({
 			async start(controller) {
 				try {
-					const res = await fetch(`${baseUrl}/v1/chat/completions`, {
-						method: 'POST',
-						headers: {
-							'Content-Type': 'application/json',
-							Authorization: `Bearer eddie-${params.id}`,
+					await streamMessage(
+						v.vsockPath,
+						{
+							type: 'chat',
+							text: message,
+							history: msgs.slice(0, -1),
+							model: v.model,
 						},
-						body: JSON.stringify({
-							model: 'hermes-agent',
-							messages: msgs,
-							stream: true,
-						}),
-					});
-
-					if (!res.ok) {
-						const errText = await res.text();
-						controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ error: errText })}\n\n`));
-						controller.close();
-						return;
-					}
-
-					const reader = res.body?.getReader();
-					if (!reader) throw new Error('no response body');
-
-					const decoder = new TextDecoder();
-					let buf = '';
-
-					while (true) {
-						const { done, value } = await reader.read();
-						if (done) break;
-
-						buf += decoder.decode(value, { stream: true });
-						const lines = buf.split('\n');
-						buf = lines.pop() || '';
-
-						for (const line of lines) {
-							if (!line.startsWith('data: ')) continue;
-							const data = line.slice(6).trim();
-							if (data === '[DONE]') continue;
-							try {
-								const parsed = JSON.parse(data);
-								const content = parsed.choices?.[0]?.delta?.content || '';
-								if (content) {
-									fullResponse += content;
-									controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ token: content })}\n\n`));
-								}
-							} catch {}
-						}
-					}
+						(token: string) => {
+							fullResponse += token;
+							controller.enqueue(
+								new TextEncoder().encode(`data: ${JSON.stringify({ token })}\n\n`),
+							);
+						},
+					);
 
 					controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ done: true })}\n\n`));
 				} catch (e: unknown) {
 					const msg = e instanceof Error ? e.message : String(e);
-					controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ error: msg })}\n\n`));
+					controller.enqueue(
+						new TextEncoder().encode(`data: ${JSON.stringify({ error: msg })}\n\n`),
+					);
 				}
 				controller.close();
 
