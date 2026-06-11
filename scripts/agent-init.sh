@@ -1,8 +1,6 @@
 #!/bin/sh
 # PID 1 inside Firecracker microVM — must never exit
 
-set -e
-
 # Mount essentials
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
@@ -23,10 +21,9 @@ if [ -n "$IP" ] && [ -n "$GW" ]; then
   ip route add default via "$GW" 2>/dev/null || true
 fi
 
-# Read metadata from MMDS (retry until available)
-MMDS="http://169.254.169.254/latest/meta-data"
+# Read metadata from MMDS via wget
 for i in $(seq 1 30); do
-  NOUS_KEY=$(curl -sf "${MMDS}/nous_api_key" 2>/dev/null) && break
+  NOUS_KEY=$(wget -q -O - http://169.254.169.254/latest/meta-data/nous_api_key 2>/dev/null) && break
   sleep 0.5
 done
 
@@ -41,7 +38,8 @@ AGENT_PID=$!
 
 # PID 1 reap loop — restart agent if it crashes
 while true; do
-  wait
+  wait "$AGENT_PID" 2>/dev/null || true
+  sleep 1
   echo "[init] Agent exited, restarting..."
   node agent.js &
   AGENT_PID=$!
