@@ -1,24 +1,15 @@
 import { json } from '@sveltejs/kit';
-import * as vm from '$lib/server/vm-manager';
+import * as sm from '$lib/server/sandbox-manager';
 
 export function GET() {
-	return json(vm.listVMs());
+	return json(sm.listVMs());
 }
 
 export async function POST({ request }) {
-	const body = await request.json();
-	const { name, provider, model, apiKey } = body;
-	if (!name || !provider || !model || !apiKey) {
-		return json({ error: 'name, provider, model, apiKey required' }, { status: 400 });
+	const { n, p, m, k, t } = await request.json();
+	if (!n || !p || !m || !k) {
+		return json({ e: 'n, p, m, k required' }, { status: 400 });
 	}
-
-	const issues = vm.ensureHost();
-	if (issues.length > 0) {
-		return json({
-			error: `Host not ready:\n${issues.join('\n')}\n\nRun scripts/setup-host.sh and ensure assets/vmlinux + assets/rootfs.ext4 exist.`,
-		}, { status: 400 });
-	}
-
-	const v = await vm.createVM(name, provider, model, apiKey);
+	const v = await sm.createVM(n, p, m, k, t);
 	return json(v, { status: 201 });
 }

@@ -1,62 +1,67 @@
 @layer base {
-  @font-face {
-    font-family: "Inter";
-    font-style: normal;
-    font-weight: 400;
-    font-display: swap;
-    src: url("/fonts/Inter-Regular.woff2") format("woff2");
-  }
+	@font-face {
+		font-family: 'Inter';
+		font-style: normal;
+		font-weight: 400;
+		font-display: swap;
+		src: url('/fonts/Inter-Regular.woff2') format('woff2');
+	}
 
-  @font-face {
-    font-family: "Geist Mono";
-    font-style: normal;
-    font-weight: 400;
-    font-display: swap;
-    src: url("/fonts/GeistMono-Regular.woff2") format("woff2");
-  }
+	@font-face {
+		font-family: 'Geist Mono';
+		font-style: normal;
+		font-weight: 400;
+		font-display: swap;
+		src: url('/fonts/GeistMono-Regular.woff2') format('woff2');
+	}
 
-  html {
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    text-rendering: optimizeLegibility;
-  }
+	html {
+		-webkit-font-smoothing: antialiased;
+		-moz-osx-font-smoothing: grayscale;
+		text-rendering: optimizeLegibility;
+	}
 
-  body {
-    background-color: var(--color-canvas);
-    color: var(--color-ink);
-    font-family: var(--font-body);
-    font-size: var(--text-body-md);
-    font-weight: 400;
-    line-height: 24px;
-  }
+	body {
+		background-color: var(--color-canvas);
+		color: var(--color-ink);
+		font-family: var(--font-body);
+		font-size: var(--text-body-md);
+		font-weight: 400;
+		line-height: 24px;
+	}
 
-  ::selection {
-    background-color: var(--color-ink);
-    color: var(--color-canvas);
-  }
+	::selection {
+		background-color: var(--color-ink);
+		color: var(--color-canvas);
+	}
 
-  :focus-visible {
-    outline: 1px solid var(--color-ink);
-    outline-offset: 2px;
-  }
+	:focus-visible {
+		outline: 1px solid var(--color-ink);
+		outline-offset: 2px;
+	}
 
-  h1, h2, h3, h4, h5, h6 {
-    font-family: var(--font-display);
-    font-weight: 400;
-  }
+	h1,
+	h2,
+	h3,
+	h4,
+	h5,
+	h6 {
+		font-family: var(--font-display);
+		font-weight: 400;
+	}
 
-  a {
-    color: var(--color-ink);
-    text-decoration: none;
-  }
+	a {
+		color: var(--color-ink);
+		text-decoration: none;
+	}
 
-  a:hover {
-    opacity: 0.7;
-  }
+	a:hover {
+		opacity: 0.7;
+	}
 
-  hr {
-    border: none;
-    border-top: 1px solid var(--color-hairline);
-    margin: 0;
-  }
+	hr {
+		border: none;
+		border-top: 1px solid var(--color-hairline);
+		margin: 0;
+	}
 }

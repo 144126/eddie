@@ -1,4 +1,4 @@
-import { killAllVMs } from '$lib/server/vm-manager';
+import { killAllVMs } from '$lib/server/sandbox-manager';
 
 process.on('SIGTERM', async () => {
 	await killAllVMs();

@@ -1,22 +1,20 @@
 export type VMStatus = 'creating' | 'running' | 'stopped' | 'error';
 
 export interface VM {
-	id: string;
-	name: string;
-	status: VMStatus;
-	ip: string;
-	socketPath: string;
-	vsockPath: string;
-	tapDevice: string;
-	provider: string;
-	model: string;
-	apiKey: string;
-	createdAt: string;
+	i: string;
+	n: string;
+	s: VMStatus;
+	b?: string;
+	p: string;
+	m: string;
+	k: string;
+	t: string;
+	c: string;
 }
 
 export interface Message {
-	id: string;
-	role: 'user' | 'assistant';
-	content: string;
-	createdAt: string;
+	i: string;
+	r: 'user' | 'assistant' | 'tool';
+	c: string;
+	a: string;
 }

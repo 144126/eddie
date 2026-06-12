@@ -27,12 +27,12 @@ export function getVMs(): VM[] {
 }
 
 export function getVM(id: string): VM | undefined {
-	return getVMs().find((v) => v.id === id);
+	return getVMs().find((v) => v.i === id);
 }
 
 export function putVM(vm: VM): void {
 	const all = getVMs();
-	const i = all.findIndex((v) => v.id === vm.id);
+	const i = all.findIndex((v) => v.i === vm.i);
 	if (i >= 0) all[i] = vm;
 	else all.push(vm);
 	writeJson(VMS_PATH, all);
@@ -41,12 +41,14 @@ export function putVM(vm: VM): void {
 export function removeVM(id: string): void {
 	writeJson(
 		VMS_PATH,
-		getVMs().filter((v) => v.id !== id)
+		getVMs().filter((v) => v.i !== id)
 	);
 	const mp = path.join(DATA_DIR, `msgs-${id}.json`);
 	try {
 		fs.unlinkSync(mp);
-	} catch {}
+	} catch {
+		// best-effort cleanup
+	}
 }
 
 export function getMessages(vmId: string): Message[] {
