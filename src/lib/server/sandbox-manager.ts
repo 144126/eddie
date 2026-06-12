@@ -13,19 +13,33 @@ function genId(): string {
 	return Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
 }
 
+function connOpts() {
+	const apiKey = process.env['E2B_API_KEY'];
+	const accessToken = process.env['E2B_ACCESS_TOKEN'];
+	const domain = process.env['E2B_DOMAIN'];
+	if (!apiKey && !accessToken) {
+		throw new Error(
+			'Set E2B_API_KEY (or E2B_ACCESS_TOKEN for self-host) in .env before creating a sandbox.'
+		);
+	}
+	return {
+		apiKey,
+		accessToken,
+		domain,
+		timeoutMs: DEFAULT_TIMEOUT_MS
+	};
+}
+
+function connectSB(sandboxId: string): Promise<InstanceType<typeof Sandbox>> {
+	return Sandbox.connect(sandboxId, connOpts());
+}
+
 export function listVMs(): VM[] {
-	const all = store.getVMs();
-	const out: VM[] = [];
-	for (const v of all) out.push(v);
-	return out;
+	return store.getVMs();
 }
 
 export function getVM(id: string): VM | undefined {
 	return store.getVM(id);
-}
-
-function connectSB(sandboxId: string): Promise<InstanceType<typeof Sandbox>> {
-	return Sandbox.connect(sandboxId, { timeoutMs: DEFAULT_TIMEOUT_MS });
 }
 
 export async function createVM(
@@ -40,7 +54,7 @@ export async function createVM(
 	store.putVM(vm);
 	log('createVM', `i=${i} n=${n} t=${t}`);
 	try {
-		const sb = await Sandbox.create(t, { timeoutMs: DEFAULT_TIMEOUT_MS });
+		const sb = await Sandbox.create(t, connOpts());
 		vm.b = sb.sandboxId;
 		vm.s = 'running';
 		store.putVM(vm);
@@ -61,7 +75,7 @@ export async function startVM(i: string): Promise<VM | null> {
 	const vm: VM = { ...existing, s: 'creating' };
 	store.putVM(vm);
 	try {
-		const sb = await Sandbox.create(existing.t, { timeoutMs: DEFAULT_TIMEOUT_MS });
+		const sb = await Sandbox.create(existing.t, connOpts());
 		vm.b = sb.sandboxId;
 		vm.s = 'running';
 		store.putVM(vm);
