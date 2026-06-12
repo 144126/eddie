@@ -19,7 +19,9 @@ function connOpts() {
 	const domain = process.env['E2B_DOMAIN'];
 	if (!apiKey && !accessToken) {
 		throw new Error(
-			'Set E2B_API_KEY (or E2B_ACCESS_TOKEN for self-host) in .env before creating a sandbox.'
+			'No orchestrator credentials set. Fill E2B_API_KEY (e2b_***) or E2B_ACCESS_TOKEN ' +
+				'(sk_e2b_***) in .env. For self-host, run `make prep-cluster` (or `make seed-db`) in ' +
+				'the e2b-dev/infra repo to generate the key locally -- no e2b.cloud account needed.'
 		);
 	}
 	return {
